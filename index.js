@@ -2,6 +2,8 @@
 
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StdioServerTransport } = require("@modelcontextprotocol/sdk/server/stdio.js");
+const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
+const http = require("http");
 const { z } = require("zod");
 
 // Configuration
@@ -401,9 +403,36 @@ server.tool(
 
 // Start server
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("ClawHire MCP server running");
+  const useHttp = process.argv.includes("--http");
+  const port = parseInt(process.env.PORT || "3100", 10);
+
+  if (useHttp) {
+    // HTTP mode — stateless Streamable HTTP transport
+    const httpServer = http.createServer(async (req, res) => {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Expose-Headers", "mcp-session-id");
+      if (req.method === "OPTIONS") {
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+        res.setHeader("Access-Control-Allow-Headers", "Content-Type, mcp-session-id");
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
+      const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+      await server.connect(transport);
+      await transport.handleRequest(req, res);
+    });
+
+    httpServer.listen(port, () => {
+      console.error(`ClawHire MCP server running on http://localhost:${port}`);
+    });
+  } else {
+    // Default: stdio mode
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.error("ClawHire MCP server running (stdio)");
+  }
 }
 
 main().catch((error) => {
